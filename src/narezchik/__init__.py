@@ -1,0 +1,1 @@
+"""Narezchik desktop application."""
