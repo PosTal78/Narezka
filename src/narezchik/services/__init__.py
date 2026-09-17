@@ -4,9 +4,11 @@ from .project_store import ProjectLoadResult, ProjectStore
 from .script_text import SegmentationMode, read_text_file, segment_text
 from .media import ffprobe_is_available
 from .subtitles import SubtitleCue, SubtitleError, parse_subtitles, read_subtitles, write_canonical
+from .translation import translate_to_russian
+from .evaluation import evaluation_ids, evaluation_report, make_label, read_evaluation, save_evaluation
 from .matching import (INDEX_MODEL_VERSION, PARTIAL_INDEX_FILENAME, build_index,
                        confirm_all_matches, discard_index_revision, local_captioner, local_embedder,
-                       read_index, read_scenes, seed_part_cache, select_matches)
+                       matching_report, read_index, read_scenes, seed_part_cache, select_matches)
 from .video import (VideoError, VideoMetadata, ensure_current_source, ensure_current_sources,
                     has_audio_stream, inspect_video, inspect_videos, probe_video)
 from .timeline import (Timeline, TimelineEntry, TimelineError, add_fragment, autofill,
@@ -20,4 +22,5 @@ __all__ = ["ProjectLoadResult", "ProjectStore", "SegmentationMode", "SubtitleCue
            "inspect_video", "inspect_videos", "parse_subtitles",
            "probe_video", "read_subtitles", "read_text_file", "segment_text", "write_canonical",
            "INDEX_MODEL_VERSION", "PARTIAL_INDEX_FILENAME", "build_index", "confirm_all_matches", "discard_index_revision",
-           "local_captioner", "local_embedder", "read_index", "read_scenes", "seed_part_cache", "select_matches"]
+           "evaluation_ids", "evaluation_report", "make_label", "read_evaluation", "save_evaluation",
+           "local_captioner", "local_embedder", "matching_report", "read_index", "read_scenes", "seed_part_cache", "select_matches", "translate_to_russian"]

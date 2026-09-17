@@ -13,7 +13,7 @@ from narezchik.models import (Project, ProjectFormatError, SegmentMatch, TTSSett
 from narezchik.services import matching
 from narezchik.services.analysis import Scene
 from narezchik.services.matching import (PARTIAL_INDEX_FILENAME, IndexedScene, build_index,
-                                          confirm_all_matches, read_index, seed_part_cache, select_matches)
+                                          confirm_all_matches, matching_report, read_index, seed_part_cache, select_matches)
 from narezchik.services.subtitles import SubtitleCue
 
 FINGERPRINT = "a" * 64
@@ -30,8 +30,15 @@ class MatchingTests(unittest.TestCase):
         self.assertEqual(confirm_all_matches(matches), (1, 1))
         self.assertEqual(matches[0].fragments, [VideoFragment(1, 2)])
         self.assertEqual(matches[0].confirmation, "bulk")
-        self.assertTrue(matches[0].manual)
+        self.assertFalse(matches[0].manual)
         self.assertTrue(matches[1].needs_review)
+
+    def test_report_counts_reused_scenes_and_unresolved_rows(self) -> None:
+        matches=[SegmentMatch(1,[VideoFragment(0,1,1)],needs_review=False),
+                 SegmentMatch(2,[VideoFragment(1,2,1)],needs_review=False),SegmentMatch(3)]
+        report=matching_report(matches)
+        self.assertEqual(report["reused_scenes"],1)
+        self.assertEqual(report["without_candidates"],1)
     def setUp(self) -> None:
         self.index = [
             IndexedScene(1, 0, 5, "Маша открывает дверь", "a woman opens a door", ("woman", "door"), None),
@@ -134,14 +141,15 @@ class MatchingTests(unittest.TestCase):
         project = Project("Тест"); ready(project, "Маша", 6)
         index = [IndexedScene(number, number - 1, number, "Маша", "Маша", (), None) for number in range(1, 7)]
         match = select_matches(project.segments, index, threshold=.01)[0]
-        self.assertEqual(len(match.fragments), 6)
-        self.assertFalse(match.needs_review)
+        # Six equally plausible copies are not a safe automatic edit.
+        self.assertEqual(match.fragments, [])
+        self.assertTrue(match.needs_review)
 
     def test_reused_previous_scene_is_a_soft_warning(self) -> None:
         project = Project("Тест"); ready(project, "Маша", 9); ready(project, "Погоня", 5)
         matches = select_matches(project.segments, self.index, threshold=.01)
+        self.assertTrue(matches[0].needs_review)
         self.assertFalse(matches[1].needs_review)
-        self.assertIn('возврат', matches[1].reason.lower())
 
     def test_suspicious_backward_match_is_allowed_with_warning(self) -> None:
         project = Project("Тест"); ready(project, "третья", 5); ready(project, "первая", 5); ready(project, "вторая", 5)

@@ -15,7 +15,7 @@ from narezchik.core import ProjectWorkflow
 from narezchik.models import Project, ProjectFormatError, SceneState, SubtitleState, VideoSource
 from narezchik.main import MainWindow
 from narezchik.services.subtitles import SubtitleCue
-from narezchik.services.analysis import AnalysisError, Scene, transcribe, write_scenes
+from narezchik.services.analysis import AnalysisCancelled, AnalysisError, Scene, detect_scenes, transcribe, write_scenes
 from narezchik.services.subtitles import parse_subtitles, read_subtitles, write_canonical
 from narezchik.services.video import VideoError, VideoMetadata, ensure_current_source, inspect_video
 
@@ -172,6 +172,10 @@ class VideoServiceTests(unittest.TestCase):
 
 
 class AnalysisStorageTests(unittest.TestCase):
+    def test_scene_detection_honours_cancel_before_opening_video(self) -> None:
+        with self.assertRaises(AnalysisCancelled):
+            detect_scenes(Path("missing.mp4"), 1.0, cancelled=lambda: True)
+
     def test_scene_write_replaces_a_complete_file_atomically(self) -> None:
         with TemporaryDirectory() as temporary:
             analysis = Path(temporary); destination = analysis / "scenes.json"

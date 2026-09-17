@@ -295,11 +295,14 @@ class SegmentMatch:
     def from_dict(cls, data: Any) -> "SegmentMatch":
         if not isinstance(data, dict):
             raise ProjectFormatError("segment match must be an object")
+        confirmation = data.get("confirmation", "manual" if data.get("manual", False) else "automatic")
+        # Older versions used ``manual=True`` for the bulk button. It was not
+        # a per-row edit and must not become story context during a new run.
+        manual = data.get("manual", False) if confirmation != "bulk" else False
         return cls(data["segment_id"], [VideoFragment.from_dict(item) for item in data.get("fragments", [])],
                    [[VideoFragment.from_dict(item) for item in candidate] for candidate in data.get("candidates", [])],
                    data.get("confidence"), data.get("needs_review", True), data.get("reason"),
-                   data.get("manual", False), data.get("context_used", False),
-                   data.get("confirmation", "manual" if data.get("manual", False) else "automatic"))
+                   manual, data.get("context_used", False), confirmation)
 
 
 def normalize_comparison_text(text: str) -> str:

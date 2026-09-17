@@ -26,9 +26,11 @@ from .media import media_tool
 from .subtitles import SubtitleCue
 
 
-INDEX_MODEL_VERSION = "blip-base+multilingual-embeddings-v2"
+INDEX_MODEL_VERSION = "blip-base+multilingual-clip-v4-strict"
 PARTIAL_INDEX_FILENAME = "video_index.partial.json"
 MATCH_THRESHOLD = 0.55
+AUTO_ACCEPT_SCORE = 0.62
+AUTO_ACCEPT_MARGIN = 0.06
 _WORD = re.compile(r"[\w'-]+", re.UNICODE)
 
 
@@ -169,15 +171,34 @@ def local_embedder() -> Callable[[str], tuple[float, ...]]:
         root = app_paths().vision_models; root.mkdir(parents=True, exist_ok=True)
         import torch
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2", cache_folder=str(root), device=device)
+        # One multilingual CLIP model embeds both the Russian narration and the
+        # actual pixels.  BLIP captions remain a UI hint, not the sole evidence.
+        model = SentenceTransformer("sentence-transformers/clip-ViT-B-32-multilingual-v1", cache_folder=str(root), device=device)
         def encode(text: str) -> tuple[float, ...]:
             nonlocal device
             try:
-                values=model.encode(text,normalize_embeddings=True)
+                values=model.encode(text,normalize_embeddings=True,show_progress_bar=False)
             except RuntimeError as error:
                 if device!='cuda' or 'out of memory' not in str(error).lower():raise
-                torch.cuda.empty_cache();model.to('cpu');device='cpu';values=model.encode(text,normalize_embeddings=True)
+                torch.cuda.empty_cache();model.to('cpu');device='cpu';values=model.encode(text,normalize_embeddings=True,show_progress_bar=False)
             return tuple(float(value) for value in values.tolist())
+        def encode_images(images: list[Path]) -> list[tuple[float, ...]]:
+            nonlocal device
+            try:
+                from PIL import Image
+                opened = [Image.open(path).convert("RGB") for path in images]
+                try:
+                    values = model.encode(opened, normalize_embeddings=True, show_progress_bar=False)
+                finally:
+                    for image in opened:
+                        image.close()
+            except RuntimeError as error:
+                if device != 'cuda' or 'out of memory' not in str(error).lower():
+                    raise
+                torch.cuda.empty_cache();model.to('cpu');device='cpu'
+                return encode_images(images)
+            return [tuple(float(value) for value in row.tolist()) for row in values]
+        encode.encode_images = encode_images  # type: ignore[attr-defined]
         return encode
     except Exception as error:
         raise AnalysisError(f"Не удалось загрузить локальную смысловую модель: {error}") from error
@@ -465,12 +486,15 @@ def build_index(video: Path | list[tuple], scenes: list[Scene], cues: list[Subti
         descriptions = tuple(descriptions_list)
         relative_paths = tuple(str(item.relative_to(analysis_dir.parent)).replace("\\", "/") for item in thumbnails_for_scene)
         description = " ".join(descriptions)
-        frame_embeddings_list: list[tuple[float, ...]] = []
-        for item in descriptions:
-            stop_if_cancelled()
-            frame_embeddings_list.append(
-                _embedding(embedder(" ".join((subtitle_text, item))), "embedding кадра")
-            )
+        image_encoder = getattr(embedder, "encode_images", None)
+        if image_encoder:
+            frame_embeddings_list = [_embedding(value, "визуальный embedding кадра")
+                                     for value in image_encoder(thumbnails_for_scene)]
+        else:
+            frame_embeddings_list = []
+            for item in descriptions:
+                stop_if_cancelled()
+                frame_embeddings_list.append(_embedding(embedder(" ".join((subtitle_text, item))), "embedding кадра"))
         stop_if_cancelled()
         frame_embeddings = tuple(frame_embeddings_list)
         combined_embedding = _embedding(embedder(" ".join((subtitle_text, description))), "embedding сцены")
@@ -613,10 +637,19 @@ def select_matches(segments: Iterable[Segment], index: list[IndexedScene], *, th
                 item.scene_id is not None and item.scene_id in scene_by_id
                 and bool(scene_by_id[item.scene_id].subtitle_text.strip()) for item in chosen
             )
+            next_score = relevance(ranked[1]) if len(ranked) > 1 else 0.0
+            margin = confidence - next_score
+            lexical_evidence = _score(segment.text, eligible[0])
+            # A score around 0.55 is merely "somewhat related" for multilingual
+            # embeddings.  Do not silently turn it into a finished edit.
+            strong = (margin >= AUTO_ACCEPT_MARGIN and
+                      (lexical_evidence >= 0.15 or
+                       (confidence >= AUTO_ACCEPT_SCORE and (lexical_evidence >= 0.04 or confidence >= 0.72))))
             reason = ("Не хватает длительности из смыслово подходящих кадров." if not covered else
                       ("Для выбранных кадров нет подтверждающего текста субтитров." if not has_subtitles else
-                       ("Мягкое предупреждение: возврат назад по сюжету." if backwards else None)))
-            needs_review = not covered or not has_subtitles
+                       ("Смысловое совпадение недостаточно однозначно." if not strong else
+                        ("Мягкое предупреждение: возврат назад по сюжету." if backwards else None))))
+            needs_review = not covered or not has_subtitles or not strong
             result.append(SegmentMatch(segment.segment_id, chosen if not needs_review else [], candidates, confidence,
                                        needs_review, reason, context_used=context_used))
             if not needs_review:
@@ -637,9 +670,31 @@ def confirm_all_matches(matches: Iterable[SegmentMatch]) -> tuple[int, int]:
         if not match.fragments:
             unresolved += 1
             continue
-        match.manual = True
+        match.manual = False
         match.confirmation = "bulk"
         match.needs_review = False
         match.reason = None
         confirmed += 1
     return confirmed, unresolved
+
+
+def matching_report(matches: Iterable[SegmentMatch]) -> dict[str, object]:
+    """Return a compact, user-readable diagnostic without changing a project."""
+    values = list(matches)
+    scores = [item.confidence for item in values if item.confidence is not None]
+    used: list[int] = []
+    backwards = 0
+    previous_end = -math.inf
+    for item in values:
+        if not item.fragments:
+            continue
+        if item.fragments[0].start < previous_end:
+            backwards += 1
+        previous_end = max(previous_end, item.fragments[-1].end)
+        used.extend(fragment.scene_id for fragment in item.fragments if fragment.scene_id is not None)
+    return {"total": len(values), "strong": sum(not item.needs_review for item in values),
+            "needs_review": sum(item.needs_review for item in values),
+            "without_candidates": sum(not item.fragments and not item.candidates for item in values),
+            "reused_scenes": len(used) - len(set(used)), "backward_jumps": backwards,
+            "score": {"minimum": min(scores) if scores else None, "maximum": max(scores) if scores else None,
+                      "average": sum(scores) / len(scores) if scores else None}}

@@ -22,6 +22,7 @@ matching = [
     "transformers>=4.45,<6",
     "torch>=2.4,<3",
     "sentence-transformers>=3.0,<4",
+    "sentencepiece>=0.2,<1",
 ]
 
 [project.scripts]

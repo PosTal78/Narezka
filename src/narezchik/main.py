@@ -7,14 +7,14 @@ from PySide6.QtCore import QObject, QThread, Signal, QUrl, Qt
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QApplication, QComboBox, QFileDialog, QFormLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget, QMainWindow, QMessageBox, QPushButton, QPlainTextEdit, QProgressBar, QSlider, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QCheckBox, QComboBox, QFileDialog, QFormLayout, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget, QMainWindow, QMessageBox, QPushButton, QPlainTextEdit, QProgressBar, QSlider, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget
 from narezchik.core import ProjectWorkflow, WorkflowError
 from narezchik.app_paths import app_paths
 from narezchik.models import ProjectFormatError, SceneState, SegmentMatch, SegmentStatus, SubtitleState, TimelineState, TTSSettings, VideoFragment, VideoIndexState, VideoSource
 from narezchik.services import (INDEX_MODEL_VERSION, PARTIAL_INDEX_FILENAME, SegmentationMode, build_index, confirm_all_matches,
                                 discard_index_revision, ensure_current_sources,
-                                ffprobe_is_available, inspect_video, local_captioner, local_embedder, read_index, read_scenes, read_subtitles,
-                                read_text_file, select_matches, write_canonical, TimelineError, add_fragment, autofill, create_from_matches, export, inspect_videos, load_timeline, remove_fragment, replace_fragment, save_timeline, synchronize_timeline, validate_timeline)
+                                evaluation_ids, evaluation_report, ffprobe_is_available, inspect_video, local_captioner, local_embedder, make_label, matching_report, read_evaluation, read_index, read_scenes, read_subtitles, save_evaluation,
+                                read_text_file, select_matches, translate_to_russian, write_canonical, TimelineError, add_fragment, autofill, create_from_matches, export, inspect_videos, load_timeline, remove_fragment, replace_fragment, save_timeline, synchronize_timeline, validate_timeline)
 from narezchik.services.analysis import detect_scenes, Scene, transcribe, write_scenes
 from narezchik.services.subtitles import SubtitleCue
 from narezchik.services.tts import EdgeTTSService, TTSQueue
@@ -37,7 +37,7 @@ class VideoWorker(QObject):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__(); self.paths=app_paths(); self.paths.ensure_data_directories(); self.flow=ProjectWorkflow(); self.project=None; self.root=None; self.tts=EdgeTTSService(); self.worker=None; self.thread=None; self.video_worker=None; self.video_thread=None; self.video_finished=None;self.video_error_label=None; self.applying_settings=False;self.preview_fragments=[];self.preview_fragment_index=0
-        self.video_part_index=0;self.video_offset=0.0;self.setting_video_source=False
+        self.video_part_index=0;self.video_offset=0.0;self.setting_video_source=False;self.evaluation_mode=False
         self.player=QMediaPlayer(self); self.player.setAudioOutput(QAudioOutput(self)); self.video_player=QMediaPlayer(self); self.video_audio=QAudioOutput(self); self.video_player.setAudioOutput(self.video_audio); self.setWindowTitle('Narezchik'); self.resize(1050,720); self.build()
     def build(self):
         root=QWidget(); box=QVBoxLayout(root); top=QHBoxLayout(); self.title=QLabel('Проект не выбран — несохранённый черновик'); top.addWidget(self.title,1)
@@ -75,10 +75,12 @@ class MainWindow(QMainWindow):
         self.match_start=QPushButton('Подготовить и подобрать кадры');self.match_start.clicked.connect(lambda:self.start_matching(False));row.addWidget(self.match_start)
         self.match_refresh_button=QPushButton('Обновить анализ');self.match_refresh_button.clicked.connect(lambda:self.start_matching(True));row.addWidget(self.match_refresh_button)
         self.match_confirm_all=QPushButton('Подтвердить всё');self.match_confirm_all.clicked.connect(self.confirm_all_matches);row.addWidget(self.match_confirm_all)
+        self.match_problems_only=QCheckBox('Только проблемные');self.match_problems_only.setChecked(True);self.match_problems_only.toggled.connect(lambda _checked:self.refresh_matching());row.addWidget(self.match_problems_only)
+        self.match_evaluation=QPushButton('Контрольные 20');self.match_evaluation.clicked.connect(self.toggle_evaluation);row.addWidget(self.match_evaluation)
         self.match_status=QLabel('Выберите фильм, подготовьте субтитры и сцены.');row.addWidget(self.match_status,1);box.addLayout(row)
-        self.match_table=QTableWidget(0,5);self.match_table.setHorizontalHeaderLabels(['ID','Реплика','Статус','Уверенность','Фрагменты']);self.match_table.itemSelectionChanged.connect(self.refresh_match_preview);box.addWidget(self.match_table,3)
+        self.match_table=QTableWidget(0,5);self.match_table.setHorizontalHeaderLabels(['ID','Реплика','Статус','Почему','Фрагменты']);self.match_table.itemSelectionChanged.connect(self.refresh_match_preview);box.addWidget(self.match_table,3)
         lower=QHBoxLayout(); self.match_thumbnail=QLabel('Миниатюра появится после анализа.');self.match_thumbnail.setMinimumWidth(300);self.match_thumbnail.setMinimumHeight(170);lower.addWidget(self.match_thumbnail)
-        actions=QVBoxLayout();self.match_preview=QPushButton('Просмотреть выбранный вариант');self.match_preview.clicked.connect(self.preview_match);actions.addWidget(self.match_preview);self.match_next=QPushButton('Следующий вариант');self.match_next.clicked.connect(self.next_match_candidate);actions.addWidget(self.match_next);self.match_choose=QPushButton('Закрепить выбранный вариант');self.match_choose.clicked.connect(self.choose_match);actions.addWidget(self.match_choose);self.match_details=QLabel('');self.match_details.setWordWrap(True);actions.addWidget(self.match_details);actions.addStretch();lower.addLayout(actions,1);box.addLayout(lower);self.match_candidate_index=0;self.match_candidate_segment=None;self.match_showing_candidate=False;return w
+        actions=QVBoxLayout();self.match_preview=QPushButton('Просмотреть выбранный вариант');self.match_preview.clicked.connect(self.preview_match);actions.addWidget(self.match_preview);self.match_next=QPushButton('Следующий вариант');self.match_next.clicked.connect(self.next_match_candidate);actions.addWidget(self.match_next);self.match_choose=QPushButton('Закрепить выбранный вариант');self.match_choose.clicked.connect(self.choose_match);actions.addWidget(self.match_choose);self.match_eval_correct=QPushButton('Контроль: этот вариант верный');self.match_eval_correct.clicked.connect(lambda:self.mark_evaluation(True));actions.addWidget(self.match_eval_correct);self.match_eval_none=QPushButton('Контроль: верного варианта нет');self.match_eval_none.clicked.connect(lambda:self.mark_evaluation(False));actions.addWidget(self.match_eval_none);self.match_details=QLabel('');self.match_details.setWordWrap(True);actions.addWidget(self.match_details);actions.addStretch();lower.addLayout(actions,1);box.addLayout(lower);self.match_candidate_index=0;self.match_candidate_segment=None;self.match_showing_candidate=False;return w
     def montage_tab(self):
         w=QWidget(); box=QVBoxLayout(w); row=QHBoxLayout(); self.timeline_status=QLabel('Создайте монтаж из результатов подбора.');row.addWidget(self.timeline_status,1)
         for label,fn in [('Обновить из проекта',self.timeline_synchronize),('Слушать озвучку',self.timeline_play_audio),('Просмотреть строку',self.timeline_preview),('Автодобрать',self.timeline_autofill),('Подтвердить строку',self.timeline_confirm)]: b=QPushButton(label);b.clicked.connect(fn);row.addWidget(b)
@@ -183,13 +185,17 @@ class MainWindow(QMainWindow):
         for index,(part,offset) in enumerate(zip(source.source_parts,source.offsets),1):
             report(index-1,len(source.source_parts),f'Расшифровываю часть {index}/{len(source.source_parts)}')
             part_cues,part_language=transcribe(Path(part.path),model_choice=model,language=language,cancelled=stopped,progress=lambda a,b,t:report(a,b,f'Часть {index}: {t}'))
+            if part_language.lower() != 'ru':
+                part_cues=translate_to_russian(part_cues,part_language,cancelled=stopped,
+                                                progress=lambda a,b,t:report(a,b,f'Часть {index}: {t}'))
             cues.extend(SubtitleCue(cue.start+offset,cue.end+offset,cue.text) for cue in part_cues);detected.append(part_language)
         return cues,(detected[0] if detected and all(item==detected[0] for item in detected) else (language or 'mixed'))
     def detect_source_scenes(self,source,stopped,report=None):
         result=[];identifier=1
         for index,(part,offset) in enumerate(zip(source.source_parts,source.offsets)):
             if report:report(index,len(source.source_parts),f'Ищу сцены в части {index+1}/{len(source.source_parts)}')
-            for scene in detect_scenes(Path(part.path),part.duration,cancelled=stopped):
+            for scene in detect_scenes(Path(part.path),part.duration,cancelled=stopped,
+                                       progress=(lambda a,b,t:report(a,b,f'Часть {index+1}: {t}')) if report else None):
                 result.append(Scene(identifier,scene.start+offset,scene.end+offset,index));identifier+=1
         return result
     def index_inputs(self,source):
@@ -208,7 +214,9 @@ class MainWindow(QMainWindow):
     def start_transcription(self):
         if not self.project or not self.project.video_is_available or self.video_worker or self.worker:return
         source=self.project.video_source;language=self.whisper_language.currentText().strip();language=None if language=='Авто' else language;model=self.whisper_model.currentText()
-        if self.project.active_subtitles and self.project.active_subtitles.kind=='whisper' and self.project.active_subtitles.source_fingerprint==source.fingerprint and self.project.active_subtitles.model==model and (language is None or self.project.active_subtitles.language==language) and (self.root/self.project.active_subtitles.subtitles_path).is_file() and (self.root/self.project.active_subtitles.transcript_path).is_file():self.video_status.setText('Используется сохранённая расшифровка.');return
+        if self.project.active_subtitles and self.project.active_subtitles.kind=='whisper' and self.project.active_subtitles.source_fingerprint==source.fingerprint and self.project.active_subtitles.model==model and (language is None or self.project.active_subtitles.language==language) and (self.root/self.project.active_subtitles.subtitles_path).is_file() and (self.root/self.project.active_subtitles.transcript_path).is_file():
+            if QMessageBox.question(self,'Повторная расшифровка','Для этого фильма уже есть локальная расшифровка. Пересобрать её и заменить активные субтитры?',QMessageBox.Yes|QMessageBox.No)!=QMessageBox.Yes:
+                self.video_status.setText('Используется сохранённая расшифровка.');return
         self.start_video_job('Проверяю исходный фильм…',lambda stopped,report:(ensure_current_sources(source,cancelled=stopped,progress=lambda a,b:report(a,b,'Проверяю содержимое файлов')),self.transcribe_source(source,model,language,stopped,report))[1],lambda result:self.finish_transcription(result,source,model))
     def finish_transcription(self,result,source,model):
         cues,language=result;self.replace_subtitles(cues, source.fingerprint, 'whisper', language, model)
@@ -282,22 +290,30 @@ class MainWindow(QMainWindow):
         try:
             self.project.set_video_index(VideoIndexState(str(index_path.relative_to(self.root)).replace('\\','/'),source.fingerprint,INDEX_MODEL_VERSION))
             self.project.replace_segment_matches(matches)
+            report_path=self.root/'analysis'/'matching-report.json'
+            report_path.write_text(json.dumps(matching_report(matches),ensure_ascii=False,indent=2)+"\n",encoding='utf-8')
             self.flow.save(self.project,self.root)
         except Exception:
             if created_subtitles or created_scenes:self.project.video_index=None;self.project.segment_matches=[]
             else:self.project.video_index=previous_index;self.project.segment_matches=previous_matches
             discard_index_revision(index_path)
             raise
-        self.match_status.setText('Подбор завершён. Проверьте строки со статусом «Требует проверки».');self.refresh_matching()
+        ready=sum(not item.needs_review for item in matches); doubtful=len(matches)-ready
+        self.match_status.setText(f'Подбор завершён: сильных совпадений {ready}, требуют проверки {doubtful}.');self.refresh_matching()
     def finish_cached_matching(self,matches):
         previous=self.project.segment_matches
         try:self.project.replace_segment_matches(matches);self.flow.save(self.project,self.root)
         except Exception:self.project.segment_matches=previous;raise
-        self.match_status.setText('Подбор обновлён по сохранённому анализу.');self.refresh_matching()
+        ready=sum(not item.needs_review for item in matches); doubtful=len(matches)-ready
+        self.match_status.setText(f'Подбор обновлён: сильных {ready}, требуют проверки {doubtful}.');self.refresh_matching()
     def refresh_matching(self):
         if not hasattr(self,'match_table'):return
         matches={item.segment_id:item for item in self.project.segment_matches} if self.project else {}
-        segments=self.project.segments if self.project else [];self.match_table.setRowCount(len(segments))
+        all_segments=self.project.segments if self.project else []
+        sample=set(evaluation_ids(matches.values())) if self.evaluation_mode else set()
+        segments=[segment for segment in all_segments if (segment.segment_id in sample if self.evaluation_mode else
+                  (not self.match_problems_only.isChecked() or not matches.get(segment.segment_id) or matches[segment.segment_id].needs_review))]
+        self.match_row_segment_ids=[segment.segment_id for segment in segments];self.match_table.setRowCount(len(segments))
         for row,segment in enumerate(segments):
             item=matches.get(segment.segment_id);status='Ожидает подбора'
             if item:
@@ -305,15 +321,38 @@ class MainWindow(QMainWindow):
                         ('Закреплено вручную' if item.confirmation=='manual' else ('Требует проверки' if item.needs_review else 'Предложено')))
                 if item.reason:status+=': '+item.reason
                 if item.context_used and not item.manual:status+='; учтён локальный контекст'
-            confidence='' if not item or item.confidence is None else f'{item.confidence:.0%}'
+            confidence='' if not item else (item.reason or ('Подтверждено несколькими сигналами' if not item.needs_review else 'Недостаточно подтверждений'))
             fragments='' if not item or not item.fragments else ', '.join(f'{part.start:.1f}–{part.end:.1f} с' for part in item.fragments)
             for column,value in enumerate([segment.segment_id,segment.text,status,confidence,fragments]):self.match_table.setItem(row,column,QTableWidgetItem(str(value)))
         self.match_start.setEnabled(bool(self.project and self.project.video_is_available and not self.video_worker));self.match_refresh_button.setEnabled(bool(self.project and self.project.video_index and not self.video_worker))
         self.match_confirm_all.setEnabled(bool(matches and not self.video_worker))
+        self.match_evaluation.setEnabled(bool(matches and not self.video_worker));self.match_eval_correct.setEnabled(self.evaluation_mode);self.match_eval_none.setEnabled(self.evaluation_mode)
+
+    def evaluation_path(self):
+        return self.root/'analysis'/'matching-evaluation.json'
+    def toggle_evaluation(self):
+        if not self.project or not self.project.segment_matches:return
+        self.evaluation_mode=not self.evaluation_mode;self.match_evaluation.setText('Показать обычный список' if self.evaluation_mode else 'Контрольные 20')
+        if self.evaluation_mode:self.match_problems_only.setChecked(False)
+        self.refresh_matching()
+        if self.evaluation_mode:
+            labels=read_evaluation(self.evaluation_path());self.match_status.setText(f'Контрольная выборка: отмечено {len(labels)} из {len(evaluation_ids(self.project.segment_matches))}.')
+    def mark_evaluation(self,correct):
+        match=self.selected_match()
+        if not self.evaluation_mode or not match:return
+        labels=read_evaluation(self.evaluation_path())
+        fragments=self.match_fragments(match) if correct else []
+        if correct and not fragments:
+            QMessageBox.information(self,'Контрольная разметка','Сначала выберите доступный вариант.');return
+        labels[match.segment_id]=make_label(match.segment_id,'correct' if correct else 'no_acceptable_candidate',self.match_candidate_index if correct else None,fragments)
+        save_evaluation(self.evaluation_path(),labels);report=evaluation_report(self.project.segment_matches,labels)
+        self.match_status.setText(f'Отмечено {report["labelled"]}: первый вариант верен {report["top1_correct"]}, в альтернативе {report["correct_in_alternatives"]}, верного нет {report["no_acceptable_candidate"]}.')
     def selected_match(self):
         if not self.project or self.match_table.currentRow()<0:return None
-        segment=self.project.segments[self.match_table.currentRow()]
-        return next((item for item in self.project.segment_matches if item.segment_id==segment.segment_id),None)
+        row=self.match_table.currentRow()
+        if row>=len(getattr(self,'match_row_segment_ids',[])):return None
+        segment_id=self.match_row_segment_ids[row]
+        return next((item for item in self.project.segment_matches if item.segment_id==segment_id),None)
     def refresh_match_preview(self):
         match=self.selected_match()
         if not match or match.segment_id!=self.match_candidate_segment:

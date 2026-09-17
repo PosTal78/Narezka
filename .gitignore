@@ -15,6 +15,7 @@ htmlcov/
 Projects/
 data/
 portable/
+portable-new/
 legacy-backup-*/
 Narezchik-portable.zip
 scripts/restore_portable.cmd

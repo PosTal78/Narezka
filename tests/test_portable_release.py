@@ -41,6 +41,8 @@ class PortablePathTests(unittest.TestCase):
         script = (Path(__file__).resolve().parents[1] / "scripts" / "build_portable.ps1").read_text(encoding="utf-8")
 
         self.assertIn("--collect-all faster_whisper", script)
+        self.assertIn("--collect-all sentencepiece", script)
+        self.assertIn("_internal\\sentencepiece\\_sentencepiece.cp312-win_amd64.pyd", script)
         self.assertIn("--collect-all ctranslate2", script)
         self.assertIn("_internal\\faster_whisper\\assets\\silero_vad_v6.onnx", script)
         self.assertIn("_internal\\torch\\lib\\cudnn64_9.dll", script)

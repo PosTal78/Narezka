@@ -8,7 +8,7 @@ $ErrorActionPreference = "Stop"
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $python = Join-Path $projectRoot ".venv\Scripts\python.exe"
 if (-not (Test-Path -LiteralPath $python)) { throw "Local virtual environment is missing: $python" }
-& $python -c "import faster_whisper, scenedetect, cv2, sentence_transformers, torch, transformers"
+& $python -c "import faster_whisper, scenedetect, cv2, sentence_transformers, sentencepiece, torch, transformers"
 if ($LASTEXITCODE -ne 0) { throw "Install video and matching dependencies in .venv before building the portable release." }
 & $python -c "import torch; print('Visual analysis device:', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU fallback')"
 
@@ -27,7 +27,7 @@ $env:PYINSTALLER_CONFIG_DIR = Join-Path $projectRoot ".scratch\pyinstaller-cache
 & $python -m PyInstaller --noconfirm --clean --onedir --windowed --name Narezchik `
     --distpath $stageRoot --workpath $workPath --specpath $workPath `
     --paths (Join-Path $projectRoot "src") `
-    --collect-all faster_whisper --collect-all ctranslate2 `
+    --collect-all faster_whisper --collect-all ctranslate2 --collect-all sentencepiece `
     (Join-Path $projectRoot "src\narezchik\main.py")
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed with exit code $LASTEXITCODE" }
 
@@ -51,6 +51,7 @@ $requiredFiles = @(
     "_internal\python312.dll",
     "_internal\faster_whisper\assets\silero_vad_v6.onnx",
     "_internal\ctranslate2\ctranslate2.dll",
+    "_internal\sentencepiece\_sentencepiece.cp312-win_amd64.pyd",
     "_internal\torch\lib\cublas64_12.dll",
     "_internal\torch\lib\cudnn64_9.dll"
 )

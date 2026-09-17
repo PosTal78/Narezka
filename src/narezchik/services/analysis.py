@@ -5,11 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 import ctypes
 import json
-import multiprocessing
 import os
 from pathlib import Path
-from queue import Empty
 import tempfile
+import time
 from typing import Callable
 
 from narezchik.app_paths import app_paths
@@ -132,50 +131,51 @@ class Scene:
     source_index: int = 0
 
 
-def _detect_scene_values(path: str, result_queue: multiprocessing.queues.Queue) -> None:
-    try:
-        from scenedetect import ContentDetector, detect
-    except ImportError as error:
-        result_queue.put(("error", "Поиск сцен не установлен. Установите зависимости этапа видео."))
-        return
-    try:
-        detected = detect(path, ContentDetector())
-    except Exception as error:
-        result_queue.put(("error", f"Не удалось определить сцены: {error}"))
-        return
-    result_queue.put(("ok", [(start.get_seconds(), end.get_seconds()) for start, end in detected]))
-
-
-def detect_scenes(path: Path, duration: float, *, cancelled: Callable[[], bool] | None = None) -> list[Scene]:
+def detect_scenes(path: Path, duration: float, *, cancelled: Callable[[], bool] | None = None,
+                  progress: Callable[[int, int, str], None] | None = None) -> list[Scene]:
+    """Detect cuts in the existing QThread, with observable progress and cancellation."""
     if cancelled and cancelled():
         raise AnalysisCancelled("Поиск сцен отменён.")
-    context = multiprocessing.get_context("spawn")
-    result_queue = context.Queue()
-    process = context.Process(target=_detect_scene_values, args=(str(path), result_queue))
-    process.start()
     try:
-        status = payload = None
-        while process.is_alive():
+        import cv2
+    except ImportError as error:
+        raise AnalysisError("Поиск сцен не установлен. Установите зависимости этапа видео.") from error
+    capture = cv2.VideoCapture(str(path))
+    if not capture.isOpened():
+        raise AnalysisError("Не удалось открыть фильм для поиска сцен.")
+    try:
+        fps = float(capture.get(cv2.CAP_PROP_FPS) or 0.0) or 24.0
+        frames = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        sample_step = max(1, round(fps / 4))
+        previous = None
+        starts = [0.0]
+        frame_number = 0
+        last_start = 0.0
+        begun = time.monotonic()
+        while True:
             if cancelled and cancelled():
-                process.terminate()
-                process.join()
                 raise AnalysisCancelled("Поиск сцен отменён.")
-            try:
-                status, payload = result_queue.get(timeout=0.1)
+            ok, frame = capture.read()
+            if not ok:
                 break
-            except Empty:
+            frame_number += 1
+            if frame_number % sample_step:
                 continue
-        if status is None:
-            try:
-                status, payload = result_queue.get_nowait()
-            except Empty as error:
-                raise AnalysisError("Поиск сцен завершился без результата.") from error
-        process.join()
+            gray = cv2.cvtColor(cv2.resize(frame, (160, 90)), cv2.COLOR_BGR2GRAY)
+            now = frame_number / fps
+            if previous is not None:
+                difference = float(cv2.absdiff(gray, previous).mean())
+                if difference >= 24.0 and now - last_start >= 0.75:
+                    starts.append(now)
+                    last_start = now
+            previous = gray
+            if progress and (frame_number % (sample_step * 20) == 0 or frame_number == frames):
+                elapsed = max(0.01, time.monotonic() - begun)
+                progress(frame_number, frames, f"Ищу сцены: {now:.0f} с из {duration:.0f} с; {len(starts)} сцен; {frame_number / elapsed:.0f} кадр/с")
     finally:
-        result_queue.close()
-    if status != "ok":
-        raise AnalysisError(payload)
-    values = [Scene(index, start, end) for index, (start, end) in enumerate(payload, 1)]
+        capture.release()
+    boundaries = starts[1:] + [duration]
+    values = [Scene(index, start, end) for index, (start, end) in enumerate(zip(starts, boundaries), 1) if end > start]
     return values or [Scene(1, 0.0, duration)]
 
 

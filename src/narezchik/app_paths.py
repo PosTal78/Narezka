@@ -15,12 +15,13 @@ class AppPaths:
         self.models = self.data / "models"
         self.whisper_models = self.models / "whisper"
         self.vision_models = self.models / "vision"
+        self.translation_models = self.models / "translation"
         self.cache = self.data / "cache"
         self.logs = self.data / "logs"
         self.ffmpeg = root / "tools" / "ffmpeg"
 
     def ensure_data_directories(self) -> None:
-        for directory in (self.projects, self.models, self.whisper_models, self.vision_models, self.cache, self.logs):
+        for directory in (self.projects, self.models, self.whisper_models, self.vision_models, self.translation_models, self.cache, self.logs):
             directory.mkdir(parents=True, exist_ok=True)
 
 
