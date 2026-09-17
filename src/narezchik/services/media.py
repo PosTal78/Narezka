@@ -7,23 +7,41 @@ import shutil
 import subprocess
 import uuid
 
+from narezchik.app_paths import app_paths
+
 
 class MediaError(RuntimeError):
     pass
 
 
+def bundled_tool(name: str) -> Path | None:
+    candidate = app_paths().ffmpeg / f"{name}.exe"
+    return candidate if candidate.is_file() else None
+
+
+def media_tool(name: str) -> str:
+    """Prefer the executable shipped with a portable release over PATH."""
+    bundled = bundled_tool(name)
+    if bundled:
+        return str(bundled)
+    found = shutil.which(name)
+    if found:
+        return found
+    raise MediaError(f"{name} не найден. Установите полный комплект FFmpeg или используйте переносимую версию Narezchik.")
+
+
 def ffprobe_is_available() -> bool:
     """Return whether the required duration tool can be started from PATH."""
-    return shutil.which("ffprobe") is not None
+    return bundled_tool("ffprobe") is not None or shutil.which("ffprobe") is not None
 
 
 def probe_duration(path: Path) -> float:
     try:
         completed = subprocess.run(
-            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=nk=1:nw=1", str(path)],
+            [media_tool("ffprobe"), "-v", "error", "-show_entries", "format=duration", "-of", "default=nk=1:nw=1", str(path)],
             capture_output=True, text=True, check=False,
         )
-    except FileNotFoundError as error:
+    except (FileNotFoundError, MediaError) as error:
         raise MediaError(
             "ffprobe не найден. Установите полный комплект FFmpeg и добавьте его в PATH."
         ) from error

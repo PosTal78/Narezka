@@ -13,7 +13,14 @@ htmlcov/
 
 # Local application data and temporary artifacts
 Projects/
+data/
+portable/
+legacy-backup-*/
+Narezchik-portable.zip
+scripts/restore_portable.cmd
 .scratch/
+.runtime/
+release/
 *.log
 
 # Editors and operating systems

@@ -33,6 +33,11 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
+# Для локальной расшифровки и поиска сцен:
+python -m pip install -e ".[video,matching]"
+
+# Для NVIDIA GPU на Windows после установки зависимостей:
+powershell -ExecutionPolicy Bypass -File scripts/enable_cuda.ps1
 ```
 
 Убедитесь, что `ffmpeg` и `ffprobe` доступны в `PATH`:
@@ -50,6 +55,10 @@ python -m narezchik
 python -m unittest discover -s tests -v
 ```
 
+## Переносимая версия для Windows
+
+Основная версия для работы — [portable/Narezchik.exe](portable/Narezchik.exe). Она не требует Python и хранит проекты, кэш и модели в `portable/data/`; эта папка не удаляется при обновлении программы. `.venv/` — техническое окружение для разработки и сборки, а не место для запуска пользователем. Инструкция сборки: [docs/PORTABLE_RELEASE.md](docs/PORTABLE_RELEASE.md).
+
 ## Документация
 
 - [PRD.md](PRD.md) — полный продуктовый контракт из ТЗ.
@@ -59,6 +68,7 @@ python -m unittest discover -s tests -v
 - [docs/TTS.md](docs/TTS.md) — первый этап озвучки.
 - [docs/VIDEO_PIPELINE.md](docs/VIDEO_PIPELINE.md) — будущие этапы видео.
 - [docs/TESTING.md](docs/TESTING.md) — условия проверки.
+- [docs/PORTABLE_RELEASE.md](docs/PORTABLE_RELEASE.md) — переносимый ZIP-выпуск Windows.
 
 ## Лицензия и атрибуция
 

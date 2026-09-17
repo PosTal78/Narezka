@@ -46,6 +46,7 @@ class ProjectStore:
                 corrupt_copy = project_root / f"project.json.corrupt-{datetime.now():%Y%m%d-%H%M%S}"
                 shutil.copy2(project_path, corrupt_copy)
             project.reconcile_audio_files(project_root)
+            project.reconcile_analysis_files(project_root)
             self.save(project_root, project)
             return ProjectLoadResult(
                 project,
@@ -54,6 +55,8 @@ class ProjectStore:
                 True,
             )
         project.reconcile_audio_files(project_root)
+        if project.reconcile_analysis_files(project_root):
+            self.save(project_root, project)
         return ProjectLoadResult(project)
 
     def save(self, project_root: Path, project: Project) -> None:

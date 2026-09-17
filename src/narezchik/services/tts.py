@@ -69,12 +69,14 @@ class TTSQueue:
                         duration = self.duration_reader(temporary)
                         temporary.replace(destination)
                         segment.mark_ready(duration, project.tts_settings)
+                        project.invalidate_segment_matches({segment.segment_id})
                         saved()
                         break
                     except Exception as error:
                         if attempt == 2:
                             segment.status = SegmentStatus.ERROR
                             segment.error = str(error) or "Не удалось создать озвучку."
+                            project.invalidate_segment_matches({segment.segment_id})
                             saved()
                         else:
                             time.sleep(0.5 * (attempt + 1))

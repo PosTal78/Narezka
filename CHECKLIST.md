@@ -23,13 +23,14 @@
 | Edge TTS | active | Голос, язык, скорость, громкость, pitch, тестовое прослушивание и обработка очереди с изолированными ошибками. |
 | Audio regeneration | active | Выбранный сегмент и отдельная подтверждаемая полная перегенерация; актуальные MP3 не перезаписываются массовой озвучкой. |
 | FFmpeg integration | active | `ffprobe` для длительности в этапе 1; FFmpeg-экспорт позднее. |
-| Video import | planned | `.mp4`/`.mkv`, ссылка на источник по умолчанию, метаданные и простой проигрыватель. |
-| Whisper transcription | planned | Локальные субтитры и транскрипт. |
-| Scene detection | planned | PySceneDetect/OpenCV, сохранение таймкодов. |
-| Scene matching | planned | Подбор одного или нескольких фрагментов на аудиосегмент и confidence. |
-| Timeline | planned | Простой редактируемый список, не аналог видеоредактора. |
-| Video export | planned | FFmpeg в `export/final.mp4`. |
-| Local AI | planned | Локальные embeddings и vision-модели для анализа и подбора. |
+| Portable Windows release | active | ZIP с `Narezchik.exe`, зависимостями и FFmpeg; данные и Whisper-модели рядом с приложением. |
+| Video import | active | Один или несколько упорядоченных `.mp4`/`.mkv`, внешние ссылки с SHA-256, общая шкала времени, метаданные и проигрыватель с переключением частей. |
+| Whisper transcription | active | Локальные субтитры и транскрипт; модели устанавливаются через extra `video`. |
+| Scene detection | active | PySceneDetect/OpenCV, сохранение таймкодов; зависимости устанавливаются через extra `video`. |
+| Scene matching | active | Локальный подбор по трём кадрам сцены с GPU при наличии; возврат назад штрафуется мягко, доступны варианты, ручное и массовое подтверждение. |
+| Timeline | active | Простой редактируемый список, не аналог видеоредактора. |
+| Video export | active | FFmpeg в `export/final.mp4` с атомарной заменой результата. |
+| Local AI | active | Локальные vision и multilingual embedding-модели для анализа и подбора; устанавливаются через extra `matching`. |
 | ElevenLabs | deferred | Дополнительный провайдер в будущем. |
 | OpenAI API | deferred | Дополнительный провайдер в будущем. |
 | Gemini API | deferred | Дополнительный провайдер в будущем. |
