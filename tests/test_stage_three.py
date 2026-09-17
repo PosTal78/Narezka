@@ -5,8 +5,10 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 import json
+from types import SimpleNamespace
 from unittest.mock import patch
 
+from PySide6.QtWidgets import QApplication, QLabel, QMessageBox
 from narezchik.main import MainWindow
 from narezchik.models import (Project, ProjectFormatError, SegmentMatch, TTSSettings,
                               VideoFragment, VideoIndexState, VideoSource)
@@ -24,6 +26,33 @@ def ready(project: Project, text: str, duration: float = 4) -> int:
     return segment.segment_id
 
 class MatchingTests(unittest.TestCase):
+    def test_refresh_button_starts_a_new_analysis_for_legacy_index(self) -> None:
+        """The v2 index in an existing project must not make Refresh a no-op."""
+        application = QApplication.instance() or QApplication([])
+        del application  # The widgets below need a QApplication, nothing else.
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            film = root / "film.mp4"
+            film.write_bytes(b"film")
+            project = Project("Тест")
+            project.video_source = VideoSource(str(film), FINGERPRINT, "film.mp4", 4, 100, 100, 24)
+            project.active_subtitles = SimpleNamespace()
+            project.scene_analysis = SimpleNamespace()
+            project.video_index = VideoIndexState("analysis/old.json", FINGERPRINT,
+                                                  "blip-base+multilingual-embeddings-v2")
+            started = []
+            window = SimpleNamespace(
+                project=project, root=root, video_worker=None, worker=None,
+                match_status=QLabel(), whisper_model=SimpleNamespace(currentText=lambda: "сбалансированно"),
+                whisper_language=SimpleNamespace(currentText=lambda: "Авто"),
+                index_inputs=lambda _source: [(film, 0.0, FINGERPRINT)],
+                start_video_job=lambda *args: started.append(args),
+            )
+            with patch("narezchik.main.QMessageBox.question", return_value=QMessageBox.Yes):
+                MainWindow.start_matching(window, True)
+            self.assertEqual(len(started), 1)
+            self.assertEqual(started[0][0], "Подбираю кадры…")
+
     def test_bulk_confirmation_accepts_first_candidate_and_keeps_unresolved(self) -> None:
         matches = [SegmentMatch(1, candidates=[[VideoFragment(1, 2)]], confidence=.4,
                                 needs_review=True, reason="Проверить"), SegmentMatch(2)]
